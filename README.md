@@ -8,14 +8,14 @@ On the panel (short-lived machine state, so everything is fixed):
 - **Background `#BFBFBF`** across the whole display — the same color the art
   plates are baked at, so sprites land seamlessly.
 - **Logo, centered** in the display (128×128 art), `assets/logo.png`.
-- **Spinner, centered** — 12 frames (`assets/spinner/00–11.png`, 30×30), one
-  revolution per second by default; centered horizontally, and vertically
-  its **center sits 185 px below the display height center**
-  (`BOOTPANEL_SPINNER_OFFSET_Y` in `src/bootpanel.h`).
+- **Spinner, centered** — 12 frames (`assets/spinner/00–11.png`, 30×30) at
+  **10 fps** (`--interval`, ms per frame, default 100); centered
+  horizontally, and vertically its **center sits 185 px below the display
+  height center** (`BOOTPANEL_SPINNER_OFFSET_Y` in `src/bootpanel.h`).
 - Runs until `SIGINT`/`SIGTERM`, then restores the console and exits — the
   display then belongs to whatever starts next.
 
-![BootPanel preview](doc/preview.png)
+![BootPanel](doc/screenshot.png)
 
 ## Display backends
 
@@ -58,7 +58,7 @@ KMS backend is compiled in).
 bootpanel                    # KMS/DRM, else legacy fbdev (auto)
 bootpanel --fbdev            # force the legacy backend
 bootpanel --kms --device=/dev/dri/card1
-bootpanel --interval=60      # ms per spinner frame (default 80)
+bootpanel --interval=60      # ms per spinner frame (default 100 = 10 fps)
 ```
 
 And, without any display backend (regression shots, e.g. for docs):

@@ -23,7 +23,7 @@
 
 #include "bootpanel.h"
 
-#define DEFAULT_INTERVAL 80  /* ms per spinner frame: ~1 s per revolution */
+#define DEFAULT_INTERVAL 100 /* ms per spinner frame: 10 fps */
 #define SHOT_W 1920
 #define SHOT_H 1080
 
@@ -45,7 +45,7 @@ static void usage(FILE *out, const char *prog)
 "  --kms               force the KMS/DRM backend (builds with libdrm)\n"
 "  --fbdev             force the legacy fbdev backend\n"
 "  --device=PATH       device for the forced backend (card0/fb0 by default)\n"
-"  --interval=MS       ms per spinner frame, 1..1000 (default %d)\n"
+"  --interval=MS       ms per spinner frame, 1..1000 (default %d = 10 fps)\n"
 "  --screenshot=PATH   compose one frame (no display needed) as a PPM, exit\n"
 "  --width=N           screenshot width, points (default %d)\n"
 "  --height=N          screenshot height, points (default %d)\n"

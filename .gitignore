@@ -1,3 +1,4 @@
 bootpanel
 *.o
 shot-*.ppm
+shot-*.ppm\n*.ppm
