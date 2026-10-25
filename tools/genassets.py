@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""Generate BootPanel's baked-in assets (src/assets_embed.{h,c}) from assets/.
+
+Everything the boot panel draws must exist before any filesystem guarantee,
+so the art goes into the binary itself as plain C arrays, no libpng at
+runtime. Run again (make assets) after editing anything in assets/:
+it regenerates the committed file.
+
+Decodes non-interlaced 8-bit PNGs of color type 0 (gray), 2 (rgb), 3
+(palette), 4 (gray+alpha) or 6 (rgba), exactly what this project's art
+uses. Python 3 stdlib only.
+
+    python3 tools/genassets.py
+"""
+
+import struct
+import sys
+import zlib
+
+LOGO = "assets/logo.png"
+SPINNER_DIR = "assets/spinner"
+SPIN_FRAMES = 12
+OUT_C = "src/assets_embed.c"
+OUT_H = "src/assets_embed.h"
+
+
+def die(msg):
+    sys.stderr.write(f"genassets: {msg}\n")
+    sys.exit(1)
+
+
+def read_png(path):
+    """Return (w, h, channels, bits) where bits is a bytes-indexable buffer
+    holding one byte per channel, row-major, decoded."""
+    data = open(path, "rb").read()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        die(f"{path}: not a PNG")
+    pos, ihdr, idat, plte, trns = 8, None, b"", None, None
+    while pos < len(data):
+        ln, typ = struct.unpack(">I4s", data[pos:pos + 8])
+        chunk = data[pos + 8:pos + 8 + ln]
+        if typ == b"IHDR":
+            ihdr = struct.unpack(">IIBBBBB", chunk)
+        elif typ == b"IDAT":
+            idat += chunk
+        elif typ == b"PLTE":
+            plte = chunk
+        elif typ == b"tRNS":
+            trns = chunk
+        elif typ == b"INTERLACE" or pos > len(data):
+            break
+        pos += 12 + ln
+    if not ihdr:
+        die(f"{path}: no IHDR")
+    w, h, bd, ct, comp, filt, il = ihdr
+    if bd != 8 or (comp, filt) != (0, 0) or il != 0:
+        die(f"{path}: only 8-bit, non-interlaced PNGs are supported "
+            f"(bd={bd} ct={ct} il={il})")
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(ct)
+    if channels is None:
+        die(f"{path}: unsupported color type {ct}")
+    if ct == 3 and not plte:
+        die(f"{path}: palette PNG without PLTE")
+    stride = w * channels
+    if len(idat) == 0:
+        die(f"{path}: no image data")
+    raw = zlib.decompress(idat)
+    expected = h * (stride + 1)
+    if len(raw) < expected:
+        die(f"{path}: image data truncated")
+
+    rows, prev = [], bytearray(stride)
+    off = 0
+    for _ in range(h):
+        f = raw[off]
+        off += 1
+        line = bytearray(raw[off:off + stride])
+        off += stride
+        if f == 1:
+            for i in range(stride):
+                left = line[i - channels] if i >= channels else 0
+                line[i] = (line[i] + left) & 0xff
+        elif f == 2:
+            for i in range(stride):
+                line[i] = (line[i] + prev[i]) & 0xff
+        elif f == 3:
+            for i in range(stride):
+                left = line[i - channels] if i >= channels else 0
+                up = prev[i]
+                line[i] = (line[i] + ((left + up) >> 1)) & 0xff
+        elif f == 4:
+            for i in range(stride):
+                a = line[i - channels] if i >= channels else 0
+                b = prev[i]
+                c = prev[i - channels] if i >= channels else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                line[i] = (line[i] + pr) & 0xff
+        elif f != 0:
+            die(f"{path}: bad filter type {f}")
+        rows.append(bytearray(line))
+        prev = line
+
+    # normalize: ct 0 stays 1-byte gray; everything else becomes RGBA
+    kind = "gray" if ct == 0 else "rgba"
+    flat = bytearray()
+    if ct == 3:
+        for row in rows:
+            for i in range(w):
+                idx = row[i]
+                rgb = plte[idx * 3:idx * 3 + 3]
+                alpha = trns[idx] if trns and idx < len(trns) else 255
+                flat += bytes(rgb) + bytes([alpha])
+    elif ct == 0:
+        for row in rows:
+            flat += row
+    elif ct == 4:
+        for row in rows:
+            for i in range(w):
+                v = row[i * 2]
+                flat += bytes([v, v, v, row[i * 2 + 1]])
+    else:
+        for row in rows:
+            flat += row
+    return w, h, kind, flat
+
+
+def emit_array(name, px, out):
+    n = len(px)
+    out.append(f"const unsigned char {name}[{n}] = {{")
+    step = 20
+    for i in range(0, n, step):
+        body = ", ".join("0x%02x" % b for b in px[i:i + step])
+        out.append(f"    {body},")
+    out.append("};")
+
+
+def main():
+    logo_w, logo_h, kind, logo = read_png(LOGO)
+    if kind != "rgba":
+        die(f"{LOGO}: expected RGB(A) art")
+    spins = []
+    for i in range(SPIN_FRAMES):
+        path = f"{SPINNER_DIR}/{i:02d}.png"
+        w, h, kind, gray = read_png(path)
+        if kind != "gray":
+            die(f"{path}: spinner frames must be grayscale")
+        spins.append((w, h, gray))
+
+    hlines = [
+        "/* generated by tools/genassets.py from assets/ - do not edit by hand */",
+        "#ifndef BOOTPANEL_ASSETS_EMBED_H",
+        "#define BOOTPANEL_ASSETS_EMBED_H",
+        "",
+        "#include <stdint.h>",
+        "",
+        f"#define BOOTPANEL_LOGO_W {logo_w}",
+        f"#define BOOTPANEL_LOGO_H {logo_h}",
+        f"#define BOOTPANEL_SPINNER_W {spins[0][0]}",
+        f"#define BOOTPANEL_SPINNER_H {spins[0][1]}",
+        "",
+        "/* logo: RGBA, 4 bytes per pixel, row-major */",
+        f"extern const unsigned char bootpanel_logo_px[{logo_w * logo_h * 4}];",
+        "",
+        "/* spinner frames: grayscale, 1 byte per pixel, row-major */",
+    ]
+    for i, (w, h, gray) in enumerate(spins):
+        hlines.append(f"extern const unsigned char bootpanel_sp{i:02d}"
+                      f"[{w * h}];")
+    hlines += ["", "#endif"]
+
+    clines = [
+        "/* generated by tools/genassets.py from assets/ - do not edit by hand */",
+        f'/* logo: RGBA from {LOGO}; spinner: gray from {SPINNER_DIR}/NN.png */',
+        f'#include "assets_embed.h"',
+        "",
+    ]
+    emit_array("bootpanel_logo_px", logo, clines)
+    clines.append("")
+    for i, (w, h, gray) in enumerate(spins):
+        emit_array(f"bootpanel_sp{i:02d}", gray, clines)
+        clines.append("")
+
+    open(OUT_H, "w").write("\n".join(hlines) + "\n")
+    open(OUT_C, "w").write("\n".join(clines) + "\n")
+    print(f"genassets: logo {len(logo)} bytes; {SPIN_FRAMES} spinner frames "
+          f"{spins[0][0]}x{spins[0][1]} ({len(spins[0][2])} bytes each) "
+          f"-> {OUT_C}, {OUT_H}")
+
+
+if __name__ == "__main__":
+    main()
