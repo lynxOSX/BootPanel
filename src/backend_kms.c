@@ -156,16 +156,25 @@ static int kms_open(backend_t *self, const char *device)
     drm_t *d = self->ctx;
     static char buf[64];
 
+    d->fd = -1;
     if (device && *device) {
         d->fd = open(device, O_RDWR | O_CLOEXEC);
+        if (d->fd < 0)
+            fprintf(stderr, "bootpanel: kms: open %s: %s\n", device,
+                    strerror(errno));
     } else {
         for (int i = 0; i < 16 && d->fd < 0; i++) {
             snprintf(buf, sizeof(buf), "/dev/dri/card%d", i);
             d->fd = open(buf, O_RDWR | O_CLOEXEC);
+            if (d->fd < 0 && errno != ENOENT)
+                fprintf(stderr, "bootpanel: kms: open %s: %s\n", buf,
+                        strerror(errno));
         }
     }
-    if (d->fd < 0)
+    if (d->fd < 0) {
+        fprintf(stderr, "bootpanel: kms: no usable /dev/dri/card* found\n");
         return -1;
+    }
 
     if (find_display(d) != 0)
         goto err;
@@ -257,7 +266,6 @@ static void kms_close(backend_t *self)
     if (d->res)
         drmModeFreeResources(d->res);
     if (d->fd >= 0) {
-        drmModeSetCrtc(d->fd, 0, 0, 0, 0, NULL, 0, NULL);
         drmDropMaster(d->fd);
         close(d->fd);
         d->fd = -1;

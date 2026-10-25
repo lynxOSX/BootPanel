@@ -19,6 +19,9 @@
 typedef struct {
     int fd;
     screen_t scr;
+    uint8_t *off;   /* offscreen compose buffer, then one memcpy to vis */
+    uint8_t *vis;
+    size_t len;
 } fbdev_t;
 
 static int fbdev_open(backend_t *self, const char *device)
@@ -53,9 +56,9 @@ static int fbdev_open(backend_t *self, const char *device)
     size_t len = (size_t)fix.smem_len > 0
         ? (size_t)fix.smem_len
         : (size_t)fix.line_length * var.yres_virtual;
-    uint8_t *map = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED,
+    uint8_t *vis = mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_SHARED,
                         b->fd, 0);
-    if (map == MAP_FAILED) {
+    if (vis == MAP_FAILED) {
         fprintf(stderr, "bootpanel: fbdev: mmap failed: %s\n",
                 strerror(errno));
         close(b->fd);
@@ -64,7 +67,7 @@ static int fbdev_open(backend_t *self, const char *device)
     }
 
     memset(&b->scr, 0, sizeof(b->scr));
-    b->scr.map = map;
+    b->scr.map = vis; /* replaced by the offscreen buffer below */
     b->scr.w = (int)var.xres;
     b->scr.h = (int)var.yres;
     b->scr.stride = (int)(fix.line_length ? fix.line_length : var.xres * bpp / 8);
@@ -81,6 +84,21 @@ static int fbdev_open(backend_t *self, const char *device)
         b->scr.g_off &= ~7;
         b->scr.b_off &= ~7;
     }
+
+    /* Compose each frame offscreen and put it up with one memcpy: writing
+     * the panel piece by piece into the visible buffer lets the scanout
+     * catch half-drawn states (visible flashing, reported in testing). */
+    b->vis = vis;
+    b->len = (size_t)b->scr.stride * (size_t)b->scr.h;
+    b->off = malloc(b->len);
+    if (!b->off) {
+        fprintf(stderr, "bootpanel: fbdev: out of memory\n");
+        munmap(vis, len);
+        close(b->fd);
+        b->fd = -1;
+        return -1;
+    }
+    b->scr.map = b->off;
     return 0;
 }
 
@@ -92,19 +110,23 @@ static const screen_t *fbdev_acquire(backend_t *self)
 
 static void fbdev_present(backend_t *self)
 {
-    (void)self; /* drawn straight into the visible map */
+    fbdev_t *b = self->ctx;
+    if (b->off && b->vis)
+        memcpy(b->vis, b->off, b->len);
 }
 
 static void fbdev_close(backend_t *self)
 {
     fbdev_t *b = self->ctx;
-    if (b->scr.map && b->scr.map != MAP_FAILED) {
+    if (b->vis && b->vis != MAP_FAILED) {
         /* Fine to leave the last frame up: the boot panel hands the screen
          * over to the desktop, which repaints everything anyway. */
-        munmap(b->scr.map,
-               (size_t)b->scr.stride * (size_t)b->scr.h);
-        b->scr.map = NULL;
+        munmap(b->vis, b->len);
+        b->vis = NULL;
     }
+    free(b->off);
+    b->off = NULL;
+    b->scr.map = NULL;
     if (b->fd >= 0) {
         close(b->fd);
         b->fd = -1;

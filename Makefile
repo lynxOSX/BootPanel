@@ -21,6 +21,13 @@ LDLIBS   += $(shell pkg-config --libs libdrm)
 OBJS += src/backend_kms.o
 endif
 
+# switching KMS changes compile flags: drop stale objects so nothing
+# survives from a differently-configured build (this bit us in testing)
+ifneq ($(KMS),$(shell cat .build-kms 2>/dev/null))
+$(shell rm -f $(OBJS))
+$(shell echo '$(KMS)' > .build-kms)
+endif
+
 all: bootpanel
 
 bootpanel: $(OBJS)
@@ -37,6 +44,6 @@ install: bootpanel
 	install -Dm755 bootpanel $(DESTDIR)/sbin/bootpanel
 
 clean:
-	rm -f bootpanel $(OBJS)
+	rm -f bootpanel $(OBJS) .build-kms
 
 .PHONY: all assets install clean

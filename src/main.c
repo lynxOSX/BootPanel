@@ -160,6 +160,7 @@ int main(int argc, char **argv)
 
     if (force_kms) {
 #ifndef HAVE_KMS
+        (void)force_fbdev;
         fprintf(stderr, "bootpanel: not built with KMS/DRM support\n");
         return 1;
 #endif
@@ -197,6 +198,8 @@ int main(int argc, char **argv)
             b = cand[i];
             break;
         }
+        fprintf(stderr, "bootpanel: %s backend failed, trying next\n",
+                cand[i]->name);
         cand[i]->close(cand[i]);
     }
     if (!b) {
@@ -210,7 +213,7 @@ int main(int argc, char **argv)
     fprintf(stderr, "bootpanel: backend %s\n", b->name);
     textconsole_inhibit();
 
-    long frame_us = (long)interval * 1000L;
+    long frame_ns = (long)interval * 1000000L;
     struct timespec next;
     clock_gettime(CLOCK_MONOTONIC, &next);
     long frame = 0;
@@ -222,7 +225,7 @@ int main(int argc, char **argv)
             bootpanel_draw(s, (int)(frame % BOOTPANEL_SPINNER_FRAMES));
         b->present(b);
 
-        next.tv_nsec += frame_us;
+        next.tv_nsec += frame_ns;
         while (next.tv_nsec >= 1000000000L) {
             next.tv_sec++;
             next.tv_nsec -= 1000000000L;
@@ -234,12 +237,12 @@ int main(int argc, char **argv)
         long ahead = (long)(now.tv_nsec - next.tv_nsec) +
                      (long)(now.tv_sec - next.tv_sec) * 1000000000L;
         while (ahead >= 0) {
-            next.tv_nsec += frame_us;
+            next.tv_nsec += frame_ns;
             while (next.tv_nsec >= 1000000000L) {
                 next.tv_sec++;
                 next.tv_nsec -= 1000000000L;
             }
-            ahead -= frame_us;
+            ahead -= frame_ns;
         }
     }
 
