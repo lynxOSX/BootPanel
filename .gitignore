@@ -1,6 +1,8 @@
 bootpanel
 bootpanel-fbonly
+bootpanel-kms
 *.o
 .build-kms
+out/
 shot-*.ppm
 shot-*.ppm\n*.ppm

@@ -28,6 +28,10 @@ $(shell rm -f $(OBJS))
 $(shell echo '$(KMS)' > .build-kms)
 endif
 
+VERSION ?= 0.1.0
+PKGREL  ?= 1
+ARCH    ?= $(shell uname -m)
+
 all: bootpanel
 
 bootpanel: $(OBJS)
@@ -40,10 +44,15 @@ bootpanel: $(OBJS)
 assets:
 	python3 tools/genassets.py
 
+# pacman package (lynxOS rootfs is Arch underneath): out/*.pkg.tar.zst
+pkg: bootpanel
+	python3 tools/mkpkg.py --version $(VERSION) --pkgrel $(PKGREL) --arch $(ARCH)
+
 install: bootpanel
 	install -Dm755 bootpanel $(DESTDIR)/sbin/bootpanel
 
 clean:
 	rm -f bootpanel $(OBJS) .build-kms
+	rm -rf out
 
-.PHONY: all assets install clean
+.PHONY: all assets install pkg clean

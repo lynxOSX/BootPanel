@@ -52,6 +52,28 @@ make install  # -> /sbin/bootpanel
 No runtime dependencies: the binary links only libc (plus -ldrm when the
 KMS backend is compiled in).
 
+## Packaging (pkg.tar.zst)
+
+A lynxOS rootfs is Arch underneath (see `lynxOSX/rootFSBuilder`), so the
+panel ships as a plain pacman package:
+
+```sh
+make pkg      # -> out/bootpanel-<version>-<pkgrel>-<arch>.pkg.tar.zst
+make pkg VERSION=0.1.0 PKGREL=1 ARCH=x86_64
+```
+
+`tools/mkpkg.py` (python3 stdlib + `zstd`) writes `.PKGINFO`, an `.MTREE`
+with size/digest verification for every file, the binary at `usr/bin/`
+and the license; install with `pacman -U`. Builds are reproducible —
+fixed mtimes, root ownership, sorted entries; two runs produce identical
+bytes. `depend = libdrm` is added automatically when the binary links it.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push: builds both variants
+(KMS+fbdev, fbdev-only) and the pacman package, and uploads them as
+workflow artifacts.
+
 ## Usage
 
 ```sh
@@ -79,6 +101,7 @@ bootpanel --screenshot=boot.ppm [--width=1280 --height=800] [--frame=3]
 | `src/assets_embed.c` | baked art (generated, committed) |
 | `assets/` | the art pack the executable is generated **from** |
 | `tools/genassets.py` | assets/ → src/assets_embed.c |
+| `tools/mkpkg.py` | pacman package builder (`make pkg`) |
 
 ## lynxOS integration (planned)
 

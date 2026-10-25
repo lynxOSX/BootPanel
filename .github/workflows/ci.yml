@@ -1,0 +1,39 @@
+name: ci
+
+on: push
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libdrm-dev zstd
+
+      - name: Build (KMS + fbdev)
+        run: |
+          make -s
+          mv bootpanel bootpanel-kms
+
+      - name: Build (fbdev-only)
+        run: |
+          make clean >/dev/null
+          make KMS=0 -s
+          mv bootpanel bootpanel-fbonly
+          make clean >/dev/null
+
+      - name: Package (pkg.tar.zst)
+        run: make pkg
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootpanel
+          path: |
+            bootpanel-kms
+            bootpanel-fbonly
+            out/*.pkg.tar.zst
+          if-no-files-found: error
